@@ -1,6 +1,5 @@
 #include <ArduinoBLE.h>
 #include <algorithm>
-#include <iostream>
 
 #define DATA_PIN 12
 
@@ -165,13 +164,18 @@ void loop() {
         if (characteristic.valueUpdated()) {
           uint8_t value[6];
           characteristic.readValue(value, 6);
-          Serial.println(value[1]);
+          uint8_t heartRate = value[1];
+          Serial.println(heartRate);
           // Change the fan speed to the corresponding HR value
           // Map the HR to 0 - 255 that corresponds to the duty cycle (PWM) fan speed
           Serial.print("Fan PWM 0-255: ");
-          duty_cycle = min((int)(((double)(value[1] - MIN_HR) / (MAX_HR - MIN_HR)) * 255) + offset, 255);
+          duty_cycle = min((int)(((double)(heartRate - MIN_HR) / (MAX_HR - MIN_HR)) * 255) + offset, 255);
           Serial.println(duty_cycle);
           analogWrite(FAN_PWM_PIN, duty_cycle);
+
+          // Prepare the HRM data to send to the connected central device
+          uint8_t hrmData[6] = {0x06, heartRate}; // Flags + Heart Rate Value
+          HeartRateMeasurement.writeValue(hrmData, 6);
         }
         delay(1000);
       }
