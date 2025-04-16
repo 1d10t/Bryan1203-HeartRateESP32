@@ -33,6 +33,15 @@ BLEDevice peripheral;
 unsigned long button_time = 0;
 unsigned long last_button_time = 0;
 
+struct BLEDeviceWithRSSI {
+  BLEDevice device;
+  int rssi;
+};
+
+bool compareDevicesByRSSI(const BLEDeviceWithRSSI& a, const BLEDeviceWithRSSI& b) {
+  return a.rssi > b.rssi;
+}
+
 void IRAM_ATTR plusISR() {
   button_time = millis();
   if (button_time - last_button_time > 250) {
@@ -128,44 +137,75 @@ void loop() {
     analogWrite(FAN_PWM_PIN, 0);
     BLE.scanForUuid("180D");
 
-    while (!peripheral) {
-      peripheral = BLE.available();
-      if (peripheral) {
-        Serial.print("Found ");
-        Serial.print(peripheral.address());
-        Serial.print(" '");
-        Serial.print(peripheral.localName());
-        Serial.print("' ");
-        Serial.print(peripheral.advertisedServiceUuid());
-        Serial.println();
+    BLEDeviceWithRSSI devices[10]; // Buffer to store up to 10 devices
+    int deviceCount = 0;
 
-        BLE.stopScan();
-        if (peripheral.connect()) {
-          Serial.println("Connected to HRM device");
-          if (peripheral.discoverAttributes()) {
-            Serial.println("Attributes discovered");
-            BLEService service = peripheral.service("180d");
-            BLECharacteristic characteristic = service.characteristic("2a37");
-            if (characteristic.canSubscribe()) {
-              characteristic.subscribe();
-              Serial.println("Subscribed to 2a37");
-              break;
-            } else {
-              Serial.println("Cannot subscribe to 2a37");
-              peripheral.disconnect();
-              peripheral = BLEDevice();
-            }
-          } else {
-            Serial.println("Attribute discovery failed!");
-            peripheral.disconnect();
-            peripheral = BLEDevice();
-          }
-        } else {
-          Serial.println("Failed to connect!");
-          peripheral = BLEDevice();
+    unsigned long scanStartTime = millis();
+    const unsigned long scanDuration = 5000; // Scan duration in milliseconds
+
+    while (millis() - scanStartTime < scanDuration) {
+      BLEDevice dev = BLE.available();
+      if (dev) {
+        int rssi = dev.rssi();
+        Serial.print("Found ");
+        Serial.print(dev.address());
+        Serial.print(" '");
+        Serial.print(dev.localName());
+        Serial.print("' ");
+        Serial.print(dev.advertisedServiceUuid());
+        Serial.print(" RSSI: ");
+        Serial.println(rssi);
+
+        if (deviceCount < 10) {
+          devices[deviceCount].device = dev;
+          devices[deviceCount].rssi = rssi;
+          deviceCount++;
         }
       }
       delay(100);
+    }
+
+    // Sort devices by RSSI in descending order
+    std::sort(devices, devices + deviceCount, compareDevicesByRSSI);
+
+    for (int i = 0; i < deviceCount; i++) {
+      BLEDevice dev = devices[i].device;
+      Serial.print("Connecting to ");
+      Serial.print(dev.address());
+      Serial.print(" '");
+      Serial.print(dev.localName());
+      Serial.print("' ");
+      Serial.print(dev.advertisedServiceUuid());
+      Serial.print(" RSSI: ");
+      Serial.println(dev.rssi());
+
+      BLE.stopScan();
+      if (dev.connect()) {
+        Serial.println("Connected to HRM device");
+        if (dev.discoverAttributes()) {
+          Serial.println("Attributes discovered");
+          BLEService service = dev.service("180d");
+          BLECharacteristic characteristic = service.characteristic("2a37");
+          if (characteristic.canSubscribe()) {
+            characteristic.subscribe();
+            Serial.println("Subscribed to 2a37");
+            peripheral = dev;
+            break;
+          } else {
+            Serial.println("Cannot subscribe to 2a37");
+            dev.disconnect();
+          }
+        } else {
+          Serial.println("Attribute discovery failed!");
+          dev.disconnect();
+        }
+      } else {
+        Serial.println("Failed to connect!");
+      }
+    }
+
+    if (!peripheral) {
+      Serial.println("No suitable device found");
     }
 
     while (peripheral.connected() && automatic) {
