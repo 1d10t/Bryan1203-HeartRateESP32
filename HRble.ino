@@ -11,11 +11,11 @@
 #define MIN_HR 45
 #define MAX_HR 210
 
-#define FAN_PWM_PIN 0
-#define PLUS_PIN 1
-#define MINUS_PIN 2
-#define AUTO_PIN 3
-#define MANUAL_PIN 4
+#define FAN_PWM_PIN 5
+#define PLUS_PIN 6
+#define MINUS_PIN 7
+#define AUTO_PIN 8
+#define MANUAL_PIN 9
 
 /* Define global variables */
 volatile uint8_t duty_cycle;
