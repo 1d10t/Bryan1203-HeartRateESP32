@@ -107,7 +107,6 @@ void setup() {
   BLE.addService(HeartRateService);
   BLE.advertise();
   Serial.println("Center established");
-  BLE.scanForUuid("180D");
 
   pinMode(FAN_PWM_PIN, OUTPUT);
   pinMode(PLUS_PIN, INPUT_PULLUP);
@@ -122,67 +121,79 @@ void setup() {
 }
 
 void loop() {
-  peripheral = BLE.available();
   BLEDevice central = BLE.central();
 
   if (automatic) {
     Serial.println("Auto Heart Rate Mode: ");
     analogWrite(FAN_PWM_PIN, 0);
-    if (peripheral) {
-      Serial.print("Found ");
-      Serial.print(peripheral.address());
-      Serial.print(" '");
-      Serial.print(peripheral.localName());
-      Serial.print("' ");
-      Serial.print(peripheral.advertisedServiceUuid());
-      Serial.println();
-      if (peripheral.localName() == "HUAWEI WATCH 4-271") {  // name of BLE HRM device
+    BLE.scanForUuid("180D");
+
+    while (!peripheral) {
+      peripheral = BLE.available();
+      if (peripheral) {
+        Serial.print("Found ");
+        Serial.print(peripheral.address());
+        Serial.print(" '");
+        Serial.print(peripheral.localName());
+        Serial.print("' ");
+        Serial.print(peripheral.advertisedServiceUuid());
+        Serial.println();
+
         BLE.stopScan();
-        if (peripheral.connect()) Serial.print("Connected to Garmin HRM ");
-        Serial.println("Discovering attributes ...");
-        if (peripheral.discoverAttributes()) {  // find services and characteristics
-          Serial.println("Attributes discovered");
-          BLEService service = peripheral.service("180d");
-          BLECharacteristic characteristic = service.characteristic("2a37");
-          characteristic.subscribe();
-          Serial.println("subscribed to 2a37");
+        if (peripheral.connect()) {
+          Serial.println("Connected to HRM device");
+          if (peripheral.discoverAttributes()) {
+            Serial.println("Attributes discovered");
+            BLEService service = peripheral.service("180d");
+            BLECharacteristic characteristic = service.characteristic("2a37");
+            if (characteristic.canSubscribe()) {
+              characteristic.subscribe();
+              Serial.println("Subscribed to 2a37");
+              break;
+            } else {
+              Serial.println("Cannot subscribe to 2a37");
+              peripheral.disconnect();
+              peripheral = BLEDevice();
+            }
+          } else {
+            Serial.println("Attribute discovery failed!");
+            peripheral.disconnect();
+            peripheral = BLEDevice();
+          }
         } else {
-          Serial.println("Attribute discovery failed!");
-          peripheral.disconnect();
-          setup();
-          return;
+          Serial.println("Failed to connect!");
+          peripheral = BLEDevice();
         }
-      } else {
-        Serial.println("Failed to connect!");
-        return;
       }
-
-      while (peripheral.connected() && automatic) {
-        BLEService service = peripheral.service("180d");
-        BLECharacteristic characteristic = service.characteristic("2a37");
-
-        if (characteristic.valueUpdated()) {
-          uint8_t value[6];
-          characteristic.readValue(value, 6);
-          uint8_t heartRate = value[1];
-          Serial.println(heartRate);
-          // Change the fan speed to the corresponding HR value
-          // Map the HR to 0 - 255 that corresponds to the duty cycle (PWM) fan speed
-          Serial.print("Fan PWM 0-255: ");
-          duty_cycle = min((int)(((double)(heartRate - MIN_HR) / (MAX_HR - MIN_HR)) * 255) + offset, 255);
-          Serial.println(duty_cycle);
-          analogWrite(FAN_PWM_PIN, duty_cycle);
-
-          // Prepare the HRM data to send to the connected central device
-          uint8_t hrmData[6] = {0x06, heartRate}; // Flags + Heart Rate Value
-          HeartRateMeasurement.writeValue(hrmData, 6);
-        }
-        delay(1000);
-      }
-      Serial.println("disconnected to HRM");
-      peripheral.disconnect();
-      setup();
+      delay(100);
     }
+
+    while (peripheral.connected() && automatic) {
+      BLEService service = peripheral.service("180d");
+      BLECharacteristic characteristic = service.characteristic("2a37");
+
+      if (characteristic.valueUpdated()) {
+        uint8_t value[6];
+        characteristic.readValue(value, 6);
+        uint8_t heartRate = value[1];
+        Serial.println(heartRate);
+        // Change the fan speed to the corresponding HR value
+        // Map the HR to 0 - 255 that corresponds to the duty cycle (PWM) fan speed
+        Serial.print("Fan PWM 0-255: ");
+        duty_cycle = min((int)(((double)(heartRate - MIN_HR) / (MAX_HR - MIN_HR)) * 255) + offset, 255);
+        Serial.println(duty_cycle);
+        analogWrite(FAN_PWM_PIN, duty_cycle);
+
+        // Prepare the HRM data to send to the connected central device
+        uint8_t hrmData[6] = {0x06, heartRate}; // Flags + Heart Rate Value
+        HeartRateMeasurement.writeValue(hrmData, 6);
+      }
+      delay(1000);
+    }
+
+    Serial.println("Disconnected from HRM device");
+    peripheral.disconnect();
+    peripheral = BLEDevice();
   } else if (!automatic && !neutral) {
     Serial.println("Manual Mode:");
     delay(1000);
